@@ -1,0 +1,5 @@
+*.html
+figures/
+other/
+.DS_Store
+*.bib

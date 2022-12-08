@@ -1,0 +1,211 @@
+---
+title: "Breakaway Alpha div Crossfoster"
+author: "hanna.bensch@lnu.se"
+date: "`r format(Sys.time(), '%Y-%m-%d')`"
+output:
+   html_document:
+        toc: yes
+        toc_float:
+          collapse: no
+        fig_caption: yes
+        code_folding: hide
+bibliography: 
+    - grateful-refs.bib
+biblio-style: apalike
+link-citations: yes
+---
+
+
+```{r setup, echo=F, cache = FALSE, message=FALSE}
+#knitr::opts_chunk$set(dev = c('pdf', 'png'), echo=F, fig.path='../figures/')
+ggplot2::theme_set(ggplot2::theme_bw())
+```
+
+```{r libraries, include = FALSE}
+suppressPackageStartupMessages(library(readr))
+suppressPackageStartupMessages(library(dplyr, warn.conflicts = FALSE))
+suppressPackageStartupMessages(library(tidyr))
+suppressPackageStartupMessages(library(purrr))
+suppressPackageStartupMessages(library(stringr))
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(kfigr))
+suppressPackageStartupMessages(library(knitr))
+suppressPackageStartupMessages(library(breakaway))
+suppressPackageStartupMessages(library(ape))
+suppressPackageStartupMessages(library(grateful))
+suppressPackageStartupMessages(library(wesanderson))
+suppressPackageStartupMessages(library(ggpubr))
+suppressPackageStartupMessages(library(forcats))
+suppressPackageStartupMessages(library(ggforce))
+suppressPackageStartupMessages(library(beepr))
+suppressPackageStartupMessages(library(phyloseq))
+```
+
+
+
+```{r constants}
+```
+
+
+# Introduction
+
+The data set consist of 53 samples from captive DMRs, 11 cross fostered siblings pairs (22 individuals) and 31 control individuals within current cross-fostered group and/or birth groups of cross-fostered individuals. Here we test if cross-fostered individuals had gut microbiomes that differed in alpha diversity from non-cross-fostered individuals.
+
+
+```{r read-data, echo=FALSE, message=FALSE, warning=FALSE}
+asvs <- read_tsv("../data/asv_table.tsv", col_types = 'ccic')
+
+metadata <- read_delim("../data/metadata.csv", delim = ",", col_types = cols(
+  .default = col_character(),
+  SampleDate = col_date(format = "")) 
+  ) %>%
+  mutate(Asample = paste(AnimalID, sample, sep="_")) %>% # get a new sample ID with letter first
+  mutate(Crossfostered = case_when(Origcolony != CurrentCol ~ "Yes",
+                                   TRUE ~ "No"))
+# get palette
+pal <- wes_palette("GrandBudapest2")
+pal <- pal[c(2,3)]
+
+#create a pseq object
+asvsp <- asvs %>% select(asv, count, sample) %>% 
+  left_join(metadata %>% select(sample, Asample)) %>% select(-sample) %>% # gove another sample name starting a letter as phyloseq once gave us problems with numbers
+  pivot_wider(names_from = 'Asample', values_from='count', values_fil= 0) %>%
+  tibble::column_to_rownames('asv') %>% as.matrix()
+metadatap <- metadata %>% 
+            mutate_if(is.character,as.factor) %>% tibble::column_to_rownames('Asample')
+
+pseq <- phyloseq(otu_table(asvsp, taxa_are_rows = TRUE), sample_data(metadatap))
+rm(asvsp, taxonomyp, metadatap)
+```
+
+
+<p>&nbsp;</p>
+
+# Results
+
+
+<p>&nbsp;</p>
+
+## Plots
+
+```{r Observed richness, echo=FALSE, fig.cap='**Figure 1. Observed alpha diversity (ASV richness).** Colour by if individual crossfostered or not.', message=FALSE, warning=FALSE, fig.height=5, fig.width=5}
+observed_c <- sample_richness(pseq)
+observed_c <- summary(observed_c) %>% rename(Asample = sample_names) %>% left_join(metadata %>% select(Asample, Crossfostered, Plate_No))
+observed_c %>% 
+  ggplot(aes(x = Crossfostered, y = estimate, col = Crossfostered)) +
+  geom_violin() +
+  geom_sina() + 
+  geom_violin() +
+  ggforce::geom_sina() +
+  ylab("Observed richness") +
+  xlab("Cross-fostered") +
+  scale_colour_manual( values = pal) +
+      theme(axis.text.x = element_text( size =15),
+          axis.title = element_text( size =15, face = "bold"),
+        panel.background=element_rect(fill = 'white', colour='black'),
+        strip.background=element_rect(fill = 'white', colour='white'),
+        strip.text = element_text(face = "bold", size=15),
+        panel.grid = element_blank(),
+        legend.position = "none"
+        )  +
+  ylim(0, 700)
+```
+
+<p>&nbsp;</p>
+
+# Breakaway Richness
+
+```{r breakaway, echo=FALSE, fig.cap='**Figure 2.Estimated alpha diversity (richness) with confidence interval with breakaway, sorted by estimate.** Colour by if individual was crossfostered or not.', message=FALSE, warning=FALSE, fig.height=8, fig.width=8}
+# Calculate estimated species richness breakaway
+adiv_break <- pseq %>% breakaway()
+adiv_break <- summary(adiv_break) %>% rename(Asample = sample_names) %>% left_join(metadata %>% select(Asample, Crossfostered, Plate_No))
+
+adiv_break %>%
+  mutate(Asample = fct_reorder(Asample, estimate)) %>%
+  ggplot(aes(x = Asample, y = estimate,col = Crossfostered)) +
+  geom_point() +
+  scale_colour_manual( values = pal) +
+  geom_errorbar(aes(ymin = lower, ymax = upper)) +
+  coord_flip() +
+  xlab('Sample') + 
+  ylab('Estimated richness with confidence interval') +
+  ggtitle("Breakaway richness")
+```
+
+
+<p>&nbsp;</p>
+
+From `breakaway-vignette`: Don't freak out! Those are wide error bars, but nothing went wrong -- it's just really hard to estimate the true number of unknown species. `breakaway` was developed to deal with this, and to make sure that we account for that uncertainty when we do inference.
+
+<p>&nbsp;</p>
+
+
+```{r breakawayviolin, echo=FALSE, fig.cap='**Figure 3. Estimated alpha diversity (richness) violins. Colour by if individyual was crossfostered or not.**', message=FALSE, warning=FALSE, fig.height=4, fig.width=5}
+adiv_break %>%
+  ggplot(aes(x = Crossfostered, y = estimate, col = Crossfostered)) +
+  geom_violin() +
+  geom_sina() + 
+  geom_violin() +
+  ggforce::geom_sina() +
+  ylab("ASV Richness") +
+  xlab("Cross-fostered") +
+  scale_colour_manual( values = pal) +
+      theme(axis.text = element_text( size =15),
+          axis.title = element_text( size =15, face = "bold"),
+        panel.background=element_rect(fill = 'white', colour='black'),
+        strip.background=element_rect(fill = 'white', colour='white'),
+        strip.text = element_text(face = "bold", size=15),
+        panel.grid = element_blank(),
+        legend.position = "none"
+        )  +
+  ylim(0, 700)
+```
+<p>&nbsp;</p>
+
+This is very similar to Observed richness.
+
+<p>&nbsp;</p>
+
+## Hypothesis testing
+
+test the null-hypothesis that samples from the two populations did not differ in richness: fit a model with Population as fixed effect using the betta() function in `breakaway`.
+
+**`r figr('betta', T, type = 'Table')`.** Estimate as a response of being cross-fostered or not.
+```{r betta, echo=FALSE}
+set.seed(3333)
+bt_fixed <- betta(formula = estimate ~ Crossfostered, 
+                      ses = error, data = adiv_break)
+bt_fixed$table %>% kable()
+```
+
+No significant difference.
+
+
+
+**`r figr('betta_random', T, type = 'Table')`.** Estimate as a response of being cross-fostered or not including plate number as random factor. 
+```{r betta_random, echo=FALSE}
+set.seed(5252)
+bt_fixed_random <-
+  betta_random(formula = estimate ~ Crossfostered | Plate_No, 
+               ses = error,  data = adiv_break)
+bt_fixed_random$table  %>% kable()
+```
+
+Also non-significant.
+
+
+<p>&nbsp;</p>
+
+# R and packages
+
+This analysis was run with `r R.version$version.string`. Versions of packages used can be found in `r figr('cite-packages', T, type = 'Table')`.
+
+```{r cite-packages, echo=FALSE, warning=FALSE, cache=FALSE}
+cite_packages(pkgs ="Session", output = "table") %>%
+  kable()
+```
+
+
+<p>&nbsp;</p>
+
+# References

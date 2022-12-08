@@ -1,0 +1,285 @@
+---
+title: "Model microbiome similarity crossfoster experiment"
+author: "hanna.bensch@lnu.se"
+date: "`r format(Sys.time(), '%Y-%m-%d')`"
+output:
+   html_document:
+        toc: yes
+        toc_float:
+          collapse: no
+        fig_caption: yes
+        code_folding: hide
+bibliography: 
+    - grateful-refs.bib
+biblio-style: apalike
+link-citations: yes
+---
+
+```{r setup, echo=F, cache = FALSE, message=FALSE}
+#knitr::opts_chunk$set(dev = c('pdf', 'png'),echo=F, fig.path='../figures/')
+ggplot2::theme_set(ggplot2::theme_bw())
+```
+
+```{r libraries, include = FALSE}
+suppressPackageStartupMessages(library(readr))
+suppressPackageStartupMessages(library(dplyr, warn.conflicts = FALSE))
+suppressPackageStartupMessages(library(tidyr))
+suppressPackageStartupMessages(library(purrr))
+suppressPackageStartupMessages(library(stringr))
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(kfigr))
+suppressPackageStartupMessages(library(knitr))
+suppressPackageStartupMessages(library(forcats))
+suppressPackageStartupMessages(library(compositions))
+suppressPackageStartupMessages(library(picante))
+suppressPackageStartupMessages(library(grateful))
+suppressPackageStartupMessages(library(sjPlot))
+suppressPackageStartupMessages(library(lmerMultiMember))
+```
+
+```{r constants}
+```
+
+
+```{r read-data, message=FALSE, warning=FALSE, include=FALSE}
+asvs <- read_tsv("../data/asv_table.tsv", col_types = 'ccic')
+metadata <- read_delim("../data/metadata.csv", delim = ",", col_types = cols(
+  .default = col_character(),
+  SampleDate = col_date(format = "")) 
+  )
+```
+
+
+<p>&nbsp;</p>
+
+# Introduction
+
+The data set consist of 53 samples from captive DMRs, 11 cross fostered siblings (22 individuals) and 31 control individuals within current cross-fostered group and/or birth groups of cross-fostered individuals. Here we model microbiome similarity calculated from Aitchison distance based on CLR-transformed data. 
+
+```{r asvsp, include = FALSE}
+asvsp <- asvs %>% #left_join(metadata %>% select(sample, Asample)) %>%
+  #select(asv, count, sample) %>%
+  pivot_wider(names_from = 'asv', values_from='count', values_fil= 0) %>%
+  tibble::column_to_rownames('sample') %>% as.matrix()
+
+# Compute Aitchison distance/similarity on whole ASV table
+pseudocount <- 0.65 # for clr-transformation
+feature_table_clr <- compositions::clr(asvsp+pseudocount)
+aitch_dist <- dist(feature_table_clr, method="euclidean")
+
+# To make the Aitchison distance more comparable to other ecological distances 
+# -> convert to a similarity after we re-scale it to be bound between 0 and 1
+aitch_sim <- (1/(1+aitch_dist/max(aitch_dist)))
+rm(aitch_dist)
+rm(asvsp)
+rm(feature_table_clr)
+rm(pseudocount)
+```
+
+
+```{r modeldata, include=FALSE}
+# turn into matrix
+aitch_sim <- aitch_sim %>% as.matrix()
+
+# replace self-comparisons and upper triangle with NA
+aitch_sim[upper.tri(aitch_sim , diag = TRUE)] <- NA
+
+# melt and filter NA
+aitch_sim  <- aitch_sim %>% 
+  reshape2::melt() %>% filter(!is.na(value)) %>%
+  mutate(Var1  = as.character(Var1),
+         Var2  = as.character(Var2))
+
+# get group affiliations - same or different
+data.dyad <- aitch_sim %>% 
+  left_join(metadata %>% select(sample, CurrentCol, Origcolony) %>% 
+              rename(Var1 = sample, Origcolony1 = Origcolony, CurrentCol1 = CurrentCol)) %>%
+  left_join(metadata %>% select(sample, CurrentCol, Origcolony) %>% 
+              rename(Var2 = sample,  Origcolony2 = Origcolony, CurrentCol2 = CurrentCol)) %>%
+  mutate(Groupmember = as.factor(case_when(CurrentCol1 == CurrentCol2 ~ 1,
+                                 TRUE ~ 0)),
+         Related = as.factor(case_when(Origcolony1 == Origcolony2 ~ 1,
+                                 TRUE ~ 0)),
+         GroupmembBirth = as.factor(case_when(Origcolony1 == CurrentCol2 ~ 1, 
+                                              Origcolony2 == CurrentCol1 ~ 1,
+                                              TRUE ~ 0))
+         ) %>% rename(Microbiome_similarity = value)
+
+# check distribution of data
+hist(data.dyad$Microbiome_similarity) # fairly normally dist # proportional values semi-normally distributed limited between 0 and 1
+hist(data.dyad$Microbiome_similarity[data.dyad$Groupmember == 1])
+hist(data.dyad$Microbiome_similarity[data.dyad$Related  == 1]) 
+hist(data.dyad$Microbiome_similarity[data.dyad$GroupmembBirth  == 1])
+```
+
+<p>&nbsp;</p>
+
+```{r lmer_model1, include=FALSE}
+# calculate m m matrix for paired random factors
+member_vec <- data.dyad %>% mutate(memb = paste(Var1, Var2, sep = ",")) %>% select(memb) %>% pull()
+memb <- lmerMultiMember::weights_from_vector(member_vec)
+currgroup_vec <- data.dyad %>% mutate(currgroup = paste(CurrentCol1, CurrentCol2, sep = ",")) %>% select(currgroup) %>% pull()
+currgroup <- lmerMultiMember::weights_from_vector(currgroup_vec)
+origgroup_vec <- data.dyad %>% mutate(origgroup = paste(Origcolony1, Origcolony2, sep = ",")) %>% select(origgroup) %>% pull()
+origgroup <- lmerMultiMember::weights_from_vector(origgroup_vec)
+
+model1 <- lmerMultiMember::lmer(Microbiome_similarity ~ Groupmember * Related +
+                                  (1|members) + (1|curr) + (1|orig), 
+                                data = data.dyad,
+                                memberships=list(members=memb, curr=currgroup, orig=origgroup))
+```
+
+
+# Results 
+
+<p>&nbsp;</p>
+
+```{r lmer_model1table, include=FALSE}
+# create empty df for estimates
+mod1_table <- data.frame(matrix(ncol = 5, nrow =4))
+colnames(mod1_table) <- c("Predictors","Estimates" ,"Std.Error", "tvalue", "pvalue")
+
+#
+mod1_table$Predictors[4] <- "Groupmember*Related"
+mod1_table$Estimates[4] <- coef(summary(model1))[4]
+mod1_table$Std.Error[4] <- coef(summary(model1))[4,2]
+mod1_table$tvalue[4] <- coef(summary(model1))[4,3]
+
+# model without interaction
+model1b <- lmerMultiMember::lmer(Microbiome_similarity ~ Groupmember + Related + 
+                                   (1|members) + (1|curr) + (1|orig), 
+                                data = data.dyad,
+                                memberships = list(members=memb, curr=currgroup, orig=origgroup))
+
+coef(summary(model1b)) # estimates fixed factors 
+
+#
+mod1_table$Predictors[2] <- "Groupmember"
+mod1_table$Estimates[2] <- coef(summary(model1b))[2]
+mod1_table$Std.Error[2] <- coef(summary(model1b))[2,2]
+mod1_table$tvalue[2] <- coef(summary(model1b))[2,3]
+
+#
+mod1_table$Predictors[3] <- "Related"
+mod1_table$Estimates[3] <- coef(summary(model1b))[3]
+mod1_table$Std.Error[3] <- coef(summary(model1b))[3,2]
+mod1_table$tvalue[3] <- coef(summary(model1b))[3,3]
+
+#
+mod1_table$Predictors[1] <- "Intercept"
+mod1_table$Estimates[1] <- coef(summary(model1b))[1]
+mod1_table$Std.Error[1] <- coef(summary(model1b))[1,2]
+mod1_table$tvalue[1] <- coef(summary(model1b))[1,3]
+
+# pvalue interaction
+mod1_table$pvalue[4] <- anova(model1, model1b)$"Pr(>Chisq)"[2] 
+
+# excluding relatedness
+model1c <- lmerMultiMember::lmer(Microbiome_similarity ~ Groupmember  + 
+                                   (1|members) + (1|curr) + (1|orig), 
+                                data = data.dyad,
+                                memberships = list(members=memb, curr=currgroup, orig=origgroup))
+anova(model1b, model1c) # pval relatness
+#pval relatness
+mod1_table$pvalue[3] <- anova(model1b, model1c)$"Pr(>Chisq)"[2] 
+
+# excluding groupmember
+model1d <- lmerMultiMember::lmer(Microbiome_similarity ~ Related  + 
+                                   (1|members) + (1|curr) + (1|orig), 
+                                data = data.dyad,
+                                memberships = list(members=memb, curr=currgroup, orig=origgroup))
+anova(model1b, model1d) # pval group member
+#pval relatness
+mod1_table$pvalue[2] <- anova(model1b, model1d)$"Pr(>Chisq)"[2] 
+
+# write table
+#mod1_table %>% 
+#  mutate_if(is.numeric, round, digits = 3) %>% 
+#  write.table("../lmersimilarity.txt", sep = ",", quote = FALSE, row.names = F)
+```
+
+
+
+**`r figr('tablemod', T, type = 'Table')`. LMM modelling microbiome similarity (Aitchison) of gut microbiomes of Damaraland mole-rats that were part of the cross-foster experiment.** Shared environment but not relatedness predicts gut microbiome similarity. 
+```{r tablemod, echo=FALSE}
+mod1_table %>% 
+  mutate_if(is.numeric, round, digits = 3) %>% 
+  kable()
+```
+
+
+<p>&nbsp;</p>
+
+
+```{r model1_plot, fig.cap='**Figure 1. Model estimates of gut microbiome similarity (Aitchison) of cross-fostering experiment Damaraland mole-rats.** Points represent model estimates with 95 % confidence intervals of predictors. Microbiome similarity is bound between 0 and 1, with higher values indicating more similar microbial communities. Microbiome similarity are from individuals within the same group (Shared Environment) or different groups (Not Shared Environment), that either have same birth group (Related) or different birth groups (Not Related).', echo=FALSE}
+p <- sjPlot::plot_model(model1, type = "int",  ci.lvl = .95)
+#summary(model1)
+
+p_dat <- ggplot_build(p)
+p_dat <- p_dat[[1]]
+p_dat <- p_dat[[2]] %>% select(-PANEL, -flipped_aes,  -xmin, -xmax, -size, -linetype, -width, -alpha, -colour, -fill)
+p_dat$Groupmember <- c("Not Shared", "Not Shared", "Shared", "Shared")
+p_dat$Related <- c("Not Related", "Related", "Not Related", "Related") 
+p_dat$label <- c("1", "2", "3", "4")
+
+p_dat %>% 
+  ggplot(aes(x = Related, y = y )) +
+  geom_pointrange(aes(x = Related, y = y, ymin = ymin, ymax = ymax), size= 0.5) +
+  xlab("Environment") +
+  ylab("Microbiome similarity") +
+  theme_classic() +
+  ylim(0.55,0.625) +
+  facet_grid(~Groupmember, scales = "free", space = "free", switch= "x") + 
+  theme(strip.background = element_blank(), 
+        panel.grid = element_blank(),
+        strip.text = element_text(size = 16, face = "bold"),
+        strip.placement = "outside",
+        panel.border = element_blank(), 
+        panel.spacing = unit(0, "mm"),
+        legend.position='none',
+        axis.text = element_text(size=16),
+        axis.title = element_text(size=22))
+```
+
+<p>&nbsp;</p>
+
+
+```{r check_model,fig.cap='**Figure 2. Model residual checks.**', echo=FALSE}
+# check residuals function
+mcheck<-function(obj,...){
+  rs<-resid(obj)
+  fv<-fitted(obj)
+  par(mfrow=c(1,3))
+  plot(fv,rs,xlab="FITTED VALUES",ylab="RESIDUALS")
+  abline(h=0,lty=2,lwd=2)
+  qqnorm(rs,xlab="NORMAL SCORES",ylab="ORDERED RESIDUALS",main="")
+  qqline(rs,lty=2,lwd=2)
+  hist(resid(obj),xlab="RESIDUALS",ylab="FREQUENCY",main="")
+  par(mfrow=c(1,1))
+  invisible(NULL)
+}
+
+mcheck(model1)
+```
+
+It is not a perfect world, but good enough.
+
+
+<p>&nbsp;</p>
+
+
+
+# R and packages
+
+This analysis was run with `r R.version$version.string`. Versions of packages used can be found in `r figr('cite-packages', T, type = 'Table')`.
+
+```{r cite-packages, echo=FALSE, cache=FALSE}
+cite_packages(pkgs ="Session", output = "table") %>%
+  kable()
+```
+
+
+<p>&nbsp;</p>
+
+# References
+
