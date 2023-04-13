@@ -59,7 +59,7 @@ The data set consist of 53 samples from captive DMRs, 11 cross fostered siblings
 ```{r asvsp, include = FALSE}
 asvsp <- asvs %>% #left_join(metadata %>% select(sample, Asample)) %>%
   #select(asv, count, sample) %>%
-  pivot_wider(names_from = 'asv', values_from='count', values_fil= 0) %>%
+  pivot_wider(names_from = 'asv', values_from='count', values_fill= 0) %>%
   tibble::column_to_rownames('sample') %>% as.matrix()
 
 # Compute Aitchison distance/similarity on whole ASV table
@@ -217,7 +217,7 @@ p <- sjPlot::plot_model(model1, type = "int",  ci.lvl = .95)
 
 p_dat <- ggplot_build(p)
 p_dat <- p_dat[[1]]
-p_dat <- p_dat[[2]] %>% select(-PANEL, -flipped_aes,  -xmin, -xmax, -size, -linetype, -width, -alpha, -colour, -fill)
+p_dat <- p_dat[[2]] %>% select(-PANEL, -flipped_aes,  -xmin, -xmax, -linetype, -width, -alpha, -colour, -fill)
 p_dat$Groupmember <- c("Not Shared", "Not Shared", "Shared", "Shared")
 p_dat$Related <- c("Not Related", "Related", "Not Related", "Related") 
 p_dat$label <- c("1", "2", "3", "4")
