@@ -1,5 +1,5 @@
 ---
-title: "Model microbiome similarity crossfoster experiment"
+title: "Model microbiome similarity cross-foster experiment"
 author: "hanna.bensch@lnu.se"
 date: "`r format(Sys.time(), '%Y-%m-%d')`"
 output:
@@ -17,7 +17,7 @@ link-citations: yes
 
 ```{r setup, echo=F, cache = FALSE, message=FALSE}
 #knitr::opts_chunk$set(dev = c('pdf', 'png'),echo=F, fig.path='../figures/')
-ggplot2::theme_set(ggplot2::theme_bw())
+#ggplot2::theme_set(ggplot2::theme_bw())
 ```
 
 ```{r libraries, include = FALSE}
@@ -54,7 +54,7 @@ metadata <- read_delim("../data/metadata.csv", delim = ",", col_types = cols(
 
 # Introduction
 
-The data set consist of 53 samples from captive DMRs, 11 cross fostered siblings (22 individuals) and 31 control individuals within current cross-fostered group and/or birth groups of cross-fostered individuals. Here we model microbiome similarity calculated from Aitchison distance based on CLR-transformed data. 
+The data set consist of 53 samples from captive DMRs, cross-fostered individuals (22 individuals) and 31 control individuals within current cross-fostered group and/or birth groups of cross-fostered individuals. Here we model microbiome similarity calculated from Aitchison distance based on CLR-transformed data. 
 
 ```{r asvsp, include = FALSE}
 asvsp <- asvs %>% #left_join(metadata %>% select(sample, Asample)) %>%
@@ -70,10 +70,9 @@ aitch_dist <- dist(feature_table_clr, method="euclidean")
 # To make the Aitchison distance more comparable to other ecological distances 
 # -> convert to a similarity after we re-scale it to be bound between 0 and 1
 aitch_sim <- (1/(1+aitch_dist/max(aitch_dist)))
-rm(aitch_dist)
-rm(asvsp)
-rm(feature_table_clr)
-rm(pseudocount)
+
+# delte unnessesary objects
+rm(aitch_dist,asvsp, feature_table_clr, pseudocount)
 ```
 
 
@@ -115,7 +114,7 @@ hist(data.dyad$Microbiome_similarity[data.dyad$GroupmembBirth  == 1])
 <p>&nbsp;</p>
 
 ```{r lmer_model1, include=FALSE}
-# calculate m m matrix for paired random factors
+# calculate m matrix for paired random factors
 member_vec <- data.dyad %>% mutate(memb = paste(Var1, Var2, sep = ",")) %>% select(memb) %>% pull()
 memb <- lmerMultiMember::weights_from_vector(member_vec)
 currgroup_vec <- data.dyad %>% mutate(currgroup = paste(CurrentCol1, CurrentCol2, sep = ",")) %>% select(currgroup) %>% pull()
@@ -211,7 +210,7 @@ mod1_table %>%
 <p>&nbsp;</p>
 
 
-```{r model1_plot, fig.cap='**Figure 1. Model estimates of gut microbiome similarity (Aitchison) of cross-fostering experiment Damaraland mole-rats.** Points represent model estimates with 95 % confidence intervals of predictors. Microbiome similarity is bound between 0 and 1, with higher values indicating more similar microbial communities. Microbiome similarity are from individuals within the same group (Shared Environment) or different groups (Not Shared Environment), that either have same birth group (Related) or different birth groups (Not Related).', echo=FALSE}
+```{r model1_plot, fig.cap='**Figure 1. Model estimates of gut microbiome similarity (Aitchison) of cross-fostering experiment Damaraland mole-rats.** Points represent model estimates with 95 % confidence intervals. Microbiome similarity is bound between 0 and 1, with higher values indicating more similar microbial communities. Microbiome similarity are from individuals within the same group (Shared Environment) or different groups (Not Shared Environment), that either have same birth group (Related) or different birth groups (Not Related).', echo=FALSE}
 p <- sjPlot::plot_model(model1, type = "int",  ci.lvl = .95)
 #summary(model1)
 
@@ -228,7 +227,7 @@ p_dat %>%
   xlab("Environment") +
   ylab("Microbiome similarity") +
   theme_classic() +
-  ylim(0.55,0.625) +
+  #ylim(0.55,0.625) +
   facet_grid(~Groupmember, scales = "free", space = "free", switch= "x") + 
   theme(strip.background = element_blank(), 
         panel.grid = element_blank(),
