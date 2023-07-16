@@ -43,7 +43,7 @@ suppressPackageStartupMessages(library(phyloseq))
 
 
 ```{r read-data, message=FALSE, warning=FALSE, include=FALSE}
-asvs <- read_tsv("../data/asv_table.tsv", col_types = 'ccic')
+asvs <- read_tsv("../data/asv_table.tsv", col_types = 'ccic') # setwd() to "../scripts"
 metadata <- read_delim("../data/metadata.csv", delim = ",", col_types = cols(
   .default = col_character(),
   SampleDate = col_date(format = "")) 
